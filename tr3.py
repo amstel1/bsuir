@@ -16,6 +16,12 @@ import pandas as pd
 import random
 from sklearn.base import BaseEstimator
 from sklearn.linear_model import LinearRegression
+from scipy.io.wavfile import read
+
+import matplotlib.pyplot as plt
+import numpy as np
+import wave
+import sys
 
 CURRENT_VERSION = 0.1
 
@@ -110,7 +116,11 @@ class Example(QMainWindow):
         btn3 = QPushButton('Open csv-file', self)
         btn3.move(100, 170)
         btn3.clicked.connect(self.openFile)
-        #btn3.clicked.connect(lambda: plotCan.plot(self.data)) 
+        #btn3.clicked.connect(lambda: plotCan.plot(self.data))
+
+        btn4 = QPushButton('Clear', self)
+        btn4.move(100, 200)
+        btn4.clicked.connect(lambda: plotCan.clear(self))
 
         self.show()
 
@@ -135,6 +145,20 @@ class Example(QMainWindow):
                 self.data = pd.read_excel(self.filepath, header=None)
                 print('excel')
                 print(type(self.data))
+            elif self.filepath.endswith('wav'):
+                spf = wave.open(self.filepath, "r")
+                # Extract Raw Audio from Wav File
+                signal = spf.readframes(-1)
+                signal = np.fromstring(signal, "Int16")
+                fs = spf.getframerate()
+                # If Stereo
+                if spf.getnchannels() == 2:
+                    print("Just mono files")
+                    sys.exit(0)
+                Time = np.linspace(0, len(signal) / fs, num=len(signal))
+                self.data = pd.DataFrame(np.concatenate((Time.reshape(signal.shape[0],1), (signal.reshape(signal.shape[0],1))), axis = 1))
+                print('wav')
+                print(self.data.shape)
         except OSError:
             pass
 
@@ -171,10 +195,19 @@ class PlotCanvas(FigureCanvas):
     def __init__(self, parent=None, width=3, height=4, dpi=100):
         fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = fig.add_subplot(111)
-
         FigureCanvas.__init__(self, fig)
         self.setParent(parent)
         FigureCanvas.updateGeometry(self)
+
+    def clear(self, data = np.empty(shape=(1,2))):
+        #self.matplotlibwidget.axes.clear()
+        #self.matplotlibwidget.axes.figure.clear()
+        #self.matplotlibwidget.axes.figure.canvas.draw_idle()
+        try:
+            self.ax.clear()
+        except AttributeError:
+            pass
+        self.draw()
     
     def plot(self, data = np.empty(shape=(1,2))):
         ax = self.figure.add_subplot(111)
@@ -187,33 +220,34 @@ class PlotCanvas(FigureCanvas):
 
     def plot_fitted(self,estimator = None, combo = None, data = np.empty(shape=(1,2))):
         sns.set_style('darkgrid')
-        ax = self.figure.add_subplot(111)
-        if estimator:
-            print('SELF ESTIMATOR', estimator)
-            #ax.plot(data.loc[:,0],data.loc[:,1], 'r-')
-        
-        if isinstance(estimator, LinearRegression) and combo.currentText() =='Линейная':
-            
-            data['y_hat'] = estimator.intercept_[0] + estimator.coef_[0][0] * data[0]
-            trend_eq = f'y = {round(estimator.intercept_[0],2)} + {round(estimator.coef_[0][0],2)} * x'
-            
-            ax.plot(data[0], data['y_hat'], marker='', linewidth=1, alpha=0.7, label="linear trend: " + trend_eq) # 
-            ax.plot(data[0], data[1], marker='', color='orange', linewidth=4, alpha=0.7, label="obs")  # 
-            print('LINEAR')
-            ax.set_title("Title", fontsize=12, fontweight=0)
-            ax.set_xlabel("xlabel")
-            ax.set_ylabel("ylabel")
-            ax.legend()
-            self.draw()
+        try:
+            estimator
+            self.ax = self.figure.add_subplot(1,1,1)
+            if isinstance(estimator, LinearRegression) and combo.currentText() =='Линейная':
+                data['y_hat'] = estimator.intercept_[0] + estimator.coef_[0][0] * data[0]
+                trend_eq = f'y = {round(estimator.intercept_[0],2)} + {round(estimator.coef_[0][0],2)} * x'
+                self.ax.plot(data[0], data['y_hat'], marker='', linewidth=1, alpha=0.7, label="linear trend: " + trend_eq) # 
+                self.ax.plot(data[0], data[1], marker='', color='orange', linewidth=4, alpha=0.7, label="obs")  # 
+                self.ax.set_title("Title", fontsize=12, fontweight=0)
+                self.ax.set_xlabel("xlabel")
+                self.ax.set_ylabel("ylabel")
+                self.ax.legend()
+                self.draw()
+            elif isinstance(estimator, LinearRegression) and combo.currentText() =='Логарифмическая':
+                data['y_hat'] = estimator.intercept_[0] + estimator.coef_[0][0] * np.log(data[0])
+                trend_eq = f'y = {round(estimator.intercept_[0],2)} + {round(estimator.coef_[0][0],2)} * ln(x)'
+                self.ax.plot(data[0], data['y_hat'], marker='', linewidth=1, alpha=0.7, label="linear trend: " + trend_eq) # 
+                self.ax.plot(data[0], data[1], marker='', color='orange', linewidth=4, alpha=0.7, label="obs")  # 
+                self.ax.set_title("Title", fontsize=12, fontweight=0)
+                self.ax.set_xlabel("xlabel")
+                self.ax.set_ylabel("ylabel")
+                self.ax.legend()
+                self.draw()
+        except AttributeError:
+            pass
 
-        elif isinstance(self.estimator, LinearRegression) and self.combo.currentText() =='Логарифмическая':
-            data['y_hat'] = self.estimator.intercept_[0] + self.estimator.coef_[0][0] * np.log(data[0])
-            trend_eq = f'y = {round(self.estimator.intercept_[0],2)} + {round(self.estimator.coef_[0][0],2)} * ln(x)'
-            sns.lineplot(data[0], data[1], marker='', color='orange', linewidth=4, alpha=0.7, label="obs")
-            sns.lineplot(data[0], data['y_hat'], marker='', linewidth=1, alpha=0.7, label="Logarithmic trend: " + trend_eq)
-            plt.title("Title", fontsize=12, fontweight=0)
-            plt.xlabel("xlabel")
-            plt.ylabel("ylabel")
+            
+
 
     
 
