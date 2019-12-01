@@ -1,0 +1,398 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+
+
+#пользователь вводит число поставщиков A и потребителей B
+a = 4
+b = 4
+sd = 12 #4 4 12+
+
+
+
+#simplex
+from anytree import Node, RenderTree
+import numpy as np
+np.random.seed(seed=sd)
+import pandas as pd
+from scipy.optimize import linprog
+
+#generate task
+from numpy.random import randint
+
+simplex_result = 0
+
+while simplex_result == 0:
+    c = randint(1,10,a*b).reshape((b,a))
+    max_ab = randint(150,200,max(a,b))
+
+    min_ab_minus1 = (randint(50,250,min(a,b)-1))
+
+    min_ab = np.append(arr = min_ab_minus1, values = sum(max_ab)-sum(min_ab_minus1))
+    np.random.seed(seed=sd)
+    sd +=1
+    #print(min_ab,max_ab)
+    #print(sum(min_ab) == sum(max_ab))
+
+    if min(min_ab) <0:
+        print('Bad inintialization. Reininitilize please.')
+        min_ab[np.argmax(min_ab)] = min_ab[np.argmax(min_ab)] + min(min_ab) - 2
+        min_ab[np.argmin(min_ab)] = 1
+
+
+    if len(min_ab) == a and len(max_ab) == b:
+        A = min_ab
+        B = max_ab
+    elif len(min_ab) == b and len(max_ab) == a:
+        B = min_ab
+        A = max_ab
+
+    #print(sum(A) == sum(B))
+
+
+    #for simplex - lower part
+    k = len(A)
+    l = len(B)
+
+    org = np.eye(k)
+    therest = [org for i in range(l)]
+    res1 = np.hstack((tuple(therest)))
+
+
+    res2 = np.zeros((l,k*l))
+    for i in range(l):
+        for j in range(l): #was k no l
+            if i == j:
+                #print(i,j)
+                for j1 in range(k):
+                    res2[i, k*i + j1] = 1
+
+    a_eq = np.vstack((res2, res1))
+
+    b_eq = np.hstack((B,A))
+
+    res = linprog(c = c.flatten(), A_eq = a_eq, b_eq=b_eq, method='revised simplex')
+    simplex_result = res.fun
+print(f'func value: {simplex_result}')
+
+
+
+
+#potentials
+#c = np.matrix([[3,5,7,1],[2,4,5,3],[1,3,6,2]]) #стоимость
+#B= np.array([60,25,30]) #спрос
+#A=np.array([15,20,30,50]) #предлоежние
+x = np.zeros_like(a = c) #план перевозок
+u = np.full_like(B, np.nan, dtype=np.double) #потенциалы предложения
+v = np.full_like(A, np.nan, dtype=np.double) #потенциалы спроса
+s = np.full_like(x, np.nan, dtype=np.double) #потенциал плана
+
+#0 опорный план
+def oporn_plan(x,A, B):
+    '''
+    Строит опроный план методом северо-западного угла
+    Input:
+    x
+    A - demand, i = 1,m
+    B - supply, j = 1,n
+    Output:
+    x - опроный план
+    '''
+    
+    A_remain = A.copy()
+    B_remain = B.copy()
+    for i in range(x.shape[0]): #B
+        for j in range(x.shape[1]): #A
+            substract = min(A_remain[j], B_remain[i])
+            x[i,j] = substract
+            A_remain[j] -= substract
+            B_remain[i] -= substract
+    return x
+
+#0.5 - проверить число незанятых клеток
+def check(x):
+    '''
+    Проверяет вырожденность опорного плана
+    Input:
+    x - опроный план
+    Output:
+    None
+    '''
+    
+    num_nonzero = len(np.nonzero(x)[0])
+    if num_nonzero == ((x.shape[0]-1)*(x.shape[1]-1)):
+        print('Опорный план невырожденный. Продолжаем')
+    else:
+        print('Планы вырожденный. Нужно доделать')
+        #print(str(num_nonzero) +' - num_nonzero;'+str((x.shape[0]-1)*(x.shape[1]-1))+'-ожидал')
+
+def potentials(x,c,s,u,v):
+    '''
+    Присваивает потенциалы плану х
+    Input:
+    x = план перевозок
+    c = стоимость
+    s = потенциал плана
+    u = потенциалы предложения
+    v = потенциалы спроса
+    Output:
+    s = потенциал плана
+    u = потенциалы предложения
+    v = потенциалы спроса
+    min_s_ix - координаты клетки, с которой начинается цикл перераспределения
+    '''
+    
+    #шаг 1 - присвоить потенциалы
+    u[0] = 0
+    while any(np.isnan(u)) or any(np.isnan(v)):
+        ii = np.argwhere(np.isnan(u) == False).flatten().tolist()
+        jj = np.argwhere(np.isnan(v) == True).flatten().tolist()
+        for i in ii:
+            for j in jj:
+                if x[i,j] != 0:
+                    v[j] = c[i,j] - u[i]
+        jj = np.argwhere(np.isnan(v) == False).flatten().tolist()
+        ii = np.argwhere(np.isnan(u) == True).flatten().tolist()
+        for j in jj:
+            for i in ii:
+                if x[i,j] != 0:
+                    u[i] = c[i,j] - v[j]
+
+    #шаг 2 - присвоить s(i,j)
+    for i in range(x.shape[0]):
+        for j in range(x.shape[1]):
+            if x[i,j] == 0:
+                s[i,j] = c[i,j] - (u[i] + v[j])
+    min_s = s[~np.isnan(s)].min()
+    min_s_ix = np.where(s==min_s)
+    
+    return s,u,v,min_s_ix
+    
+'''class Tree:
+    def __init__(self, data, parent = None, position = ()):
+        self.data = data
+        self.parent = parent
+        self.children = []
+        self.position = position #level, postion
+    def __repr__(self):
+        return f'data: {str(self.data)}, children:{str(self.children)}'
+
+    def get_siblings(self):
+        self.siblings = []
+        if self.children:
+            for c in self.children:
+                if self.data != c.data:
+                    self.siblings.append(c)
+        return self.siblings
+
+    def add_child(self, data):
+        what_append = Tree(data, self)
+        lvl = what_append.parent.position[0]+1
+        pos = 0
+        n_sibl = len(self.get_siblings())
+        if n_sibl>0:
+            pos = n_sibl
+        what_append.position = (lvl, pos)
+        self.children.append(what_append)
+
+    def search_parent_by_postion(self, position = ()):
+        if self.position == position:
+            return self
+        if self.parent:
+            prnt = self.parent
+            while prnt:
+                if prnt.position == position:
+                    return prnt
+                else:
+                    try:
+                        prnt = prnt.parent
+                    except:
+                        print('Not found')'''
+
+def find_cycle(s,min_s_ix):
+    '''
+    Определяет цикл перераспределения
+    Input:
+    s = потенциал плана
+    min_s_ix
+    Output:
+    result = Tree, attributes: data as tuple, children as list, parent as Tree
+    '''
+    
+    
+        
+    #s = np.matrix([[np.nan,np.nan,4,-5],[-2,np.nan,9,-6],[-6,np.nan,np.nan,-6],[np.nan,10,16,np.nan,]])
+
+    m = s.shape[0]
+    n = s.shape[1]
+    isnnan = np.isnan(s)
+    #начало цикла - клетка матрицы s (потенциалы из potentials) c минимальным значением
+    start = Node(name = 'root', data = (min_s_ix[0][0],min_s_ix[-1][0])) #star.data = min_s_ix
+    this_i = start.data[0]
+    this_j = start.data[1]
+    #поиск первого ребенка (второго узла цикла) в 0-ой строке 
+    kk = 0
+    for j in range(n):
+        if j != this_j and isnnan[this_i,j] == True:
+            Node(name = f'level_0__position_{kk}', parent = start, data = (this_i,j))
+            kk += 1
+
+
+    parents = list([start])
+    ################################
+    #МАКСИМАЛЬНОЕ ЧИЛО ИТЕРАЦИЙ = 20
+    ################################
+    turn = 0
+    break_while = False
+    while turn <20:
+        if break_while:
+            break
+        for parent in parents:
+            kk = 0
+            if parent.children:
+                for child in parent.children:
+                    #если пришли в начало цикла
+                    if (start.data[0] == child.data[0] or start.data[1] == child.data[1]) and turn >= 2:
+                        print(f'Cycle built successfully. Exit iter: {turn}')
+                        #print(child)
+                        result = child
+                        break_while = True
+                        break
+                    #фиксируем строку, идем по колнками
+                    elif turn % 2 == 0:
+                        #print(turn, 1)
+                        for i in range(m):
+                            for j in range(n):
+                                #проверяем, что не возвращаемся на шаг назад = избегаем зацикливания
+                                if ((i != child.data[0] and j == child.data[1]) and
+                                    ((i,j) != child.data) and (isnnan[i,j] == True) and child.parent.data != (i,j)):
+                                        Node(name = f'level_{turn+1}__position_{kk}', parent = child, data = (i,j))
+                                        kk += 1
+                    #фиксируем колонку, идем по строкам
+                    elif turn % 2 == 1:
+                        #print(turn, 0)
+                        for i in range(m):
+                            for j in range(n):
+                                #проверяем, что не возвращаемся на шаг назад = избегаем зацикливания
+                                if ((i == child.data[0] and j != child.data[1]) and
+                                    ((i,j) != child.data) and (isnnan[i,j] == True) and child.parent.data != (i,j)):
+                                        Node(name = f'level_{turn+1}__position_{kk}', parent = child, data = (i,j))
+                                        kk += 1
+
+                turn += 1
+        parents = [y for y in child.parent.children if y.children != []] #оставляем только перспективые
+        if not parents[0].children:
+            #если защли в тупик
+            parents = [x.parent for x in start.leaves if x != child]
+            turn += 1    
+            #
+
+        
+        
+    return result,turn
+
+def get_parent(Tree):
+    try:
+        return Tree.parent
+    except AttributeError:
+        pass
+
+def get_cycle(result,turn):
+    '''
+    Преобразуем Tree в словарь= {номер узла:i,j,знак}
+    Input:
+    result = Tree, parents.data которого - координаты цикла
+    Output:
+    cycle = dict {номер узла:i,j,знак}
+    min_val = объем перераспределения
+    '''
+    i = 1
+    sign = '+'
+    cycle = {}
+    r = result
+    while  i <= turn:
+        if i == 1:
+           print (x.data, '-', f'iter #: {i-1}') 
+           cycle[f'{i-1}'] = (r.data[0], r.data[1], '-')
+        r = get_parent(r)
+        if r:
+            print (r.data, sign, f'iter #: {i}')
+            cycle[f'{i}'] = (r.data[0], r.data[1], sign)
+        if sign == '+':
+            sign = '-'
+        else:
+            sign = '+'
+        i += 1
+    
+    #определить объем перераспределения
+    min_vals = []
+    for v in cycle.values():
+        if v[-1] == '-':
+            min_vals.append(x[v[0],v[1]]) 
+    min_val = min(min_vals)
+    return cycle, min_val
+
+#перераспределить поставки
+def pererasp_postavki(x, cycle, min_val):
+    '''
+    Перераспредляем поставку в х
+    Input:
+    x - план перевозки
+    cycle = dict {номер узла:i,j,знак}
+    min_val = объем перераспределения
+    Output:
+    x - план перевозки
+    '''
+    for v in cycle.values():
+        if v[-1] == '-':
+            x[v[0],v[1]] -= min_val
+        elif v[-1] == '+':
+            x[v[0],v[1]] += min_val
+    return x
+
+
+
+#main 1
+x = oporn_plan(x, A, B)
+check(x)
+s,u,v,min_s_ix=potentials(x,c,s,u,v)
+if np.min(s[~np.isnan(s)]) <= 0:
+    result,turn=find_cycle(s,min_s_ix)
+    cycle, min_val = get_cycle(result,turn)
+    print('Цикл перераспределения:', cycle )
+    x = pererasp_postavki(x, cycle, min_val)
+    print(f'my function value: {np.sum(np.multiply(x,c))}')
+else:
+    print('optimal solution')
+
+
+#main 2+
+while not res.fun == np.sum(np.multiply(x,c)):
+    u = np.full_like(B, np.nan, dtype=np.double) #потенциалы предложения
+    v = np.full_like(A, np.nan, dtype=np.double) #потенциалы спроса
+    s = np.full_like(x, np.nan, dtype=np.double) #потенциал плана 
+
+    s,u,v,min_s_ix=potentials(x,c,s,u,v)
+    if np.min(s[~np.isnan(s)]) < 0:
+        result,turn=find_cycle(s,min_s_ix)
+        cycle, min_val = get_cycle(result,turn)
+        x = pererasp_postavki(x, cycle, min_val)
+        print(f'function value: {np.sum(np.multiply(x,c))}')
+    else:
+        print('optimal solution')
+        print(f'function value: {np.sum(np.multiply(x,c))}')
+
+
+
+print(f'my func value: {np.sum(np.multiply(x,c))}')
+print(f'simplex func value: {res.fun}')
+assert res.fun == np.sum(np.multiply(x,c))
+print()
+print(f'simplex x-matrix: {res.x.reshape(b,a)}')
+print()
+print(f'my solutions: {x.reshape(b,a)}')
+
+
+
+
+
